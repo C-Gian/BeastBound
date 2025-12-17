@@ -1,0 +1,34 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7cf8a3b5d72f2b844b4f36a9e0526608, type: 3}
+  m_Name: Aqua
+  m_EditorClassIdentifier: 
+  monsterName: Aqua
+  type: 3
+  description: 
+  associatedColor: {r: 0.13411888, g: 0.4325906, b: 0.78113204, a: 1}
+  maxHP: 150
+  attack: 10
+  defense: 10
+  speed: 1
+  expYield: 100
+  learnableMoves:
+  - moveBase: {fileID: 11400000, guid: fa55ca3fe9cff6e43a1e58d2018744f3, type: 2}
+    level: 1
+  - moveBase: {fileID: 11400000, guid: f2dbd6fa58d327742bd8a1edaaa67f79, type: 2}
+    level: 2
+  - moveBase: {fileID: 11400000, guid: ad3860fecb026554799c495a1ed645af, type: 2}
+    level: 3
+  - moveBase: {fileID: 11400000, guid: 5e7dc17663e5b444ba89cf75f252ccc3, type: 2}
+    level: 4
+  - moveBase: {fileID: 11400000, guid: c2f313a2d0f27c04d973426bdf8ab91b, type: 2}
+    level: 5
