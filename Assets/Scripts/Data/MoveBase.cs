@@ -14,5 +14,6 @@ public class MoveBase : ScriptableObject
     public int power;              // Potenza (es. 40)
     public int accuracy;           // Precisione (es. 100 per 100%)
 
+    public int pp;
     // In futuro qui aggiungeremo il "Tipo" (Fuoco, Acqua...)
 }

@@ -1,4 +1,4 @@
-using TMPro; // FONDAMENTALE: Ci permette di usare TextMeshPro
+using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -6,14 +6,18 @@ public class NpcInteract : MonoBehaviour
 {
     private bool isPlayerClose = false;
 
+    [Header("Identità NPC")]
+    public string trainerID = "Steve_01"; // <--- NUOVO: Nome univoco per salvare la vittoria
+
     // --- VARIABILI UI ---
-    [Header("UI References")] // Crea un titoletto nell'Inspector per ordine
-    public GameObject dialoguePanel; // Il rettangolo nero intero
-    public TMP_Text dialogueText;    // Il componente del testo
+    [Header("UI References")]
+    public GameObject dialoguePanel;
+    public TMP_Text dialogueText;
     // --------------------
 
     [Header("Data")]
-    public MonsterData monsterToGive;
+    public MonsterData monsterToGive; // (In realtà è il nemico contro cui combatti)
+    [Range(1, 100)] public int enemyLevel = 3; // <--- Ho aggiunto il livello qui per comodità
 
     void Start()
     {
@@ -22,19 +26,12 @@ public class NpcInteract : MonoBehaviour
             dialoguePanel.SetActive(false);
     }
 
-    void Update()
+    private void Update()
     {
+        // Se il giocatore è vicino e preme E
         if (isPlayerClose && Input.GetKeyDown(KeyCode.E))
         {
-            // Se il pannello è già aperto, lo chiudiamo, altrimenti parliamo
-            if (dialoguePanel.activeSelf)
-            {
-                CloseDialogue();
-            }
-            else
-            {
-                Talk();
-            }
+            Talk();
         }
     }
 
@@ -52,20 +49,63 @@ public class NpcInteract : MonoBehaviour
         if (other.CompareTag("Player"))
         {
             isPlayerClose = false;
-            CloseDialogue(); // Se ti allontani mentre parla, il box si chiude
+
+            // Chiudi il pannello se ti allontani
+            if (dialoguePanel != null)
+            {
+                dialoguePanel.SetActive(false);
+            }
+
+            // SBLOCCO MENU: Ora puoi riaprire il menu con TAB
+            if (GameManager.instance != null)
+            {
+                GameManager.instance.isDialogueActive = false;
+            }
         }
     }
 
     void Talk()
     {
+        // --- 1. BLOCCO MENU ---
+        // Appena iniziamo a parlare, diciamo al GameManager di BLOCCARE il tasto TAB
+        if (GameManager.instance != null)
+        {
+            GameManager.instance.isDialogueActive = true;
+        }
+
+        // --- 2. CONTROLLO VITTORIA ---
+        if (GameManager.instance != null && GameManager.instance.defeatedTrainers.Contains(trainerID))
+        {
+            // MOSTRA DIALOGO DI SCONFITTA
+            if (dialoguePanel != null && dialogueText != null)
+            {
+                dialoguePanel.SetActive(true);
+                dialogueText.text = "Mi hai già sconfitto! Non ho più mostri da mandare in campo.";
+            }
+            return; // Esci, non caricare la battaglia!
+        }
+
+        // --- 3. MOSTRA DIALOGO SFIDA ---
+        if (dialoguePanel != null && dialogueText != null)
+        {
+            dialoguePanel.SetActive(true);
+            dialogueText.text = "Preparati a lottare!";
+        }
+
+        // --- 4. SETUP BATTAGLIA (IL TUO CODICE ORIGINALE) ---
         Debug.Log("Inizio Battaglia con " + monsterToGive.monsterName);
 
         if (GameManager.instance != null)
         {
+            // A. Passiamo chi è il nemico e a che livello è
             GameManager.instance.activeEnemy = monsterToGive;
+            GameManager.instance.activeEnemyLevel = enemyLevel;
 
+            // B. Passiamo l'ID, così se vinciamo il BattleSystem lo può segnare
+            GameManager.instance.currentOpponentID = trainerID;
+
+            // C. Salviamo la posizione per il ritorno
             GameObject player = GameObject.FindGameObjectWithTag("Player");
-
             if (player != null)
             {
                 GameManager.instance.nextSpawnPosition = player.transform.position;
@@ -78,12 +118,20 @@ public class NpcInteract : MonoBehaviour
             return;
         }
 
+        // D. Carica la scena
         SceneManager.LoadScene("BattleScene");
     }
 
-
     void CloseDialogue()
     {
-        dialoguePanel.SetActive(false);
+        if (dialoguePanel != null)
+        {
+            dialoguePanel.SetActive(false);
+
+            // --- SBLOCCO ALTRI MENU ---
+            if (GameManager.instance != null)
+                GameManager.instance.isDialogueActive = false;
+            // --------------------------
+        }
     }
 }

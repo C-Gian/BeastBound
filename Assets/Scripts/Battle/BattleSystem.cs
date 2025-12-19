@@ -5,7 +5,16 @@ using System.Collections.Generic;
 using UnityEngine.UI;
 using UnityEngine.SceneManagement;
 
-public enum BattleState { START, PLAYERTURN, PLAYERMOVESELECT, ENEMYTURN, WON, LOST }
+public enum BattleState
+{
+    START,
+    PLAYERTURN,
+    PLAYERMOVESELECT,
+    ENEMYTURN,
+    WON,
+    LOST,
+    BUSY // <--- Aggiunto questo
+}
 
 public class BattleSystem : MonoBehaviour
 {
@@ -38,6 +47,14 @@ public class BattleSystem : MonoBehaviour
     public MonsterData debugEnemyBase;
     public MonsterData debugPlayerBase;
 
+    [Header("UI Inventario")]
+    public GameObject inventoryPanel;       // Il pannello intero
+    public Transform itemsContainer;        // Dove generare i bottoni
+    public GameObject itemButtonPrefab;     // Il prefab del bottone creato prima
+    public TMP_Text itemDescriptionText;    // Testo descrizione in basso
+
+    private ItemBase selectedItem;          // L'oggetto che stiamo guardando
+
     // --- NUOVO: Livelli separati ---
     [Range(1, 100)] public int playerStartLevel = 5;
     [Range(1, 100)] public int enemyStartLevel = 3;
@@ -48,8 +65,17 @@ public class BattleSystem : MonoBehaviour
 
     void Start()
     {
+        Cursor.lockState = CursorLockMode.None;
+        Cursor.visible = true;
+
         actionsPanel.SetActive(false);
         movesPanel.SetActive(false);
+
+        if (moveSelectionPanel != null)
+        {
+            moveSelectionPanel.SetActive(false);
+        }
+
         state = BattleState.START;
         StartCoroutine(SetupBattle());
     }
@@ -67,10 +93,41 @@ public class BattleSystem : MonoBehaviour
 
     IEnumerator SetupBattle()
     {
-        // Uso i due livelli separati
-        Monster playerMonster = new Monster(debugPlayerBase, playerStartLevel);
-        Monster enemyMonster = new Monster(debugEnemyBase, enemyStartLevel);
+        // 0. Reset UI
+        actionsPanel.SetActive(false);
+        movesPanel.SetActive(false);
 
+        // 1. RECUPERO DATI (GameManager vs Debug)
+        Monster playerMonster = null;
+        Monster enemyMonster = null;
+
+        // Controlliamo se esiste il GameManager e se ha una squadra
+        if (GameManager.instance != null && GameManager.instance.playerParty.Count > 0)
+        {
+            // Prende il primo mostro della squadra (quello VERO, con exp e livelli salvati)
+            playerMonster = GameManager.instance.playerParty[0];
+
+            // Se il GameManager ha impostato un nemico specifico (es. incontro nell'erba)
+            if (GameManager.instance.activeEnemy != null)
+            {
+                enemyMonster = new Monster(GameManager.instance.activeEnemy, GameManager.instance.activeEnemyLevel);
+            }
+        }
+
+        // FALLBACK: Se non abbiamo trovato dati nel GameManager (o stiamo testando solo la scena battaglia)
+        // usiamo le variabili di Debug dell'Inspector
+        if (playerMonster == null)
+        {
+            playerMonster = new Monster(debugPlayerBase, playerStartLevel);
+        }
+
+        if (enemyMonster == null)
+        {
+            // Se il nemico è null, usiamo quello di debug
+            enemyMonster = new Monster(debugEnemyBase, enemyStartLevel);
+        }
+
+        // 2. SPAWN VISUALE E SETUP HUD
         GameObject playerGO = Instantiate(monsterPrefab, playerSpawnPoint.position, playerSpawnPoint.rotation);
         playerUnit = playerGO.GetComponent<BattleUnit>();
         playerUnit.Setup(playerMonster);
@@ -81,9 +138,13 @@ public class BattleSystem : MonoBehaviour
         enemyUnit.Setup(enemyMonster);
         enemyHUD.SetupHUD(enemyUnit.monster);
 
+        // 3. INIZIO BATTAGLIA
         battleLogText.text = "Appare un " + enemyUnit.monster._base.monsterName + " Lvl " + enemyUnit.monster.level + "!";
 
-        // --- NUOVO: CONTROLLO VELOCITÀ ---
+        // Aspettiamo 2 secondi per leggere il testo dell'apparizione
+        yield return new WaitForSeconds(2f);
+
+        // 4. CONTROLLO VELOCITÀ
         if (playerUnit.monster.Speed >= enemyUnit.monster.Speed)
         {
             battleLogText.text = "Sei più veloce! Attacchi per primo.";
@@ -100,10 +161,6 @@ public class BattleSystem : MonoBehaviour
         }
     }
 
-    // ... (PlayerTurn, OnAttackButton, ecc. rimangono uguali - OMESSI PER BREVITÀ, SONO SOTTO) ...
-    // ... COPIA PURE I METODI DI INTERAZIONE UI DALLO SCRIPT PRECEDENTE O TIENILI SE NON LI HAI CANCELLATI ...
-
-    // RIMETTO I METODI UI ESSENZIALI PER COMPLETEZZA (Cosi puoi fare copia-incolla sicuro)
     void PlayerTurn()
     {
         battleLogText.text = "Cosa farà " + playerUnit.monster._base.monsterName + "?";
@@ -143,7 +200,6 @@ public class BattleSystem : MonoBehaviour
 
     public void OnRunButton() { if (state != BattleState.PLAYERTURN) return; StartCoroutine(RunAwaySequence()); }
 
-    // ... CALCOLI DANNO ...
     float GetTypeEffectiveness(MonsterType moveType, MonsterType defenderType)
     {
         if (moveType == MonsterType.None || defenderType == MonsterType.None) return 1f;
@@ -234,25 +290,34 @@ public class BattleSystem : MonoBehaviour
 
             enemyUnit.gameObject.SetActive(false);
 
-            // 1. Calcolo EXP
+            // --- 1. SALVATAGGIO VITTORIA NPC (Il pezzo mancante) ---
+            // Se c'è un GameManager e abbiamo un ID dell'avversario (es. "Steve_01")
+            if (GameManager.instance != null && !string.IsNullOrEmpty(GameManager.instance.currentOpponentID))
+            {
+                Debug.Log("Vittoria registrata contro: " + GameManager.instance.currentOpponentID);
+                GameManager.instance.AddDefeatedTrainer(GameManager.instance.currentOpponentID);
+
+                // Resettiamo l'ID per pulizia, così non lo segna due volte per sbaglio
+                GameManager.instance.currentOpponentID = "";
+            }
+            // -------------------------------------------------------
+
+            // 2. Calcolo EXP
             int expGained = enemyUnit.monster._base.expYield * enemyUnit.monster.level;
             battleLogText.text = "Guadagni " + expGained + " Punti Esperienza!";
             yield return WaitForInput();
 
-            // 2. Assegna EXP ai dati
+            // 3. Assegna EXP ai dati
             playerUnit.monster.AddExp(expGained);
 
-            // 3. CICLO DI LIVELLAMENTO
+            // 4. CICLO DI LIVELLAMENTO
             while (playerUnit.monster.currentExp >= playerUnit.monster.ExpForNextLevel)
             {
-                // A. Anima barra fino al massimo
                 yield return StartCoroutine(playerHUD.SmoothExpChange(playerUnit.monster.ExpForNextLevel));
                 yield return new WaitForSeconds(0.2f);
 
-                // B. Level Up Dati
                 playerUnit.monster.LevelUp();
 
-                // C. Feedback
                 battleLogText.text = "LEVEL UP!";
                 playerHUD.SetLevelText(playerUnit.monster.level);
                 playerHUD.SetExpInstant(0);
@@ -260,41 +325,36 @@ public class BattleSystem : MonoBehaviour
 
                 battleLogText.text = playerUnit.monster._base.monsterName + " sale al livello " + playerUnit.monster.level + "!";
 
-                // Aggiorna massimo barra e HP
                 playerHUD.expSlider.maxValue = playerUnit.monster.ExpForNextLevel;
                 playerHUD.SetHP(playerUnit.monster.currentHP);
 
                 yield return WaitForInput();
 
-                // D. CONTROLLO NUOVE MOSSE
+                // Controllo nuove mosse
                 MoveBase newMove = playerUnit.monster.GetMoveAtCurrentLevel();
                 if (newMove != null)
                 {
                     if (playerUnit.monster.moves.Count < 4)
                     {
-                        // C'è spazio: Impara subito
                         playerUnit.monster.LearnMove(newMove);
                         battleLogText.text = playerUnit.monster._base.monsterName + " ha imparato " + newMove.moveName + "!";
                         yield return WaitForInput();
                     }
                     else
                     {
-                        // SPAZIO PIENO: Apri il menu Scorda Mossa (ECCO LA MODIFICA)
                         battleLogText.text = playerUnit.monster._base.monsterName + " vuole imparare " + newMove.moveName + "...";
                         yield return WaitForInput();
                         battleLogText.text = "...ma conosce già 4 mosse!";
                         yield return WaitForInput();
 
-                        // Chiama la nuova funzione UI che hai appena scritto
+                        // Chiama la UI "Scorda Mossa"
                         yield return StartCoroutine(ChooseMoveToForget(newMove));
-
-                        // Quando la Coroutine finisce, l'utente ha scelto. Andiamo avanti.
                         yield return WaitForInput();
                     }
                 }
             }
 
-            // 4. Riempi barra col resto dell'EXP
+            // 5. Riempi barra col resto dell'EXP
             yield return StartCoroutine(playerHUD.SmoothExpChange(playerUnit.monster.currentExp));
             yield return WaitForInput();
 
@@ -303,7 +363,7 @@ public class BattleSystem : MonoBehaviour
         else if (state == BattleState.LOST)
         {
             battleLogText.text = "Sei stato sconfitto...";
-            playerUnit.monster.currentHP = playerUnit.monster.MaxHP;
+            playerUnit.monster.currentHP = playerUnit.monster.MaxHP; // Cura di emergenza (o game over)
             yield return WaitForInput();
             SceneManager.LoadScene(0);
         }
@@ -359,5 +419,187 @@ public class BattleSystem : MonoBehaviour
     {
         battleLogText.text = playerUnit.monster._base.monsterName + " non ha imparato " + moveToLearn.moveName + ".";
         moveSelectionPanel.SetActive(false);
+    }
+
+    // 1. Chiamato quando premi il bottone "BAG" nel menu principale
+    public void OnBagButton()
+    {
+        actionsPanel.SetActive(false); // Nascondi azioni (Attacca/Fuga)
+        inventoryPanel.SetActive(true); // Mostra zaino
+
+        UpdateInventoryUI();
+    }
+
+    // 2. Disegna la lista degli oggetti
+    void UpdateInventoryUI()
+    {
+        // Pulisci i vecchi bottoni (se c'erano)
+        foreach (Transform child in itemsContainer)
+        {
+            Destroy(child.gameObject);
+        }
+
+        // Recupera gli oggetti dal GameManager
+        if (GameManager.instance.inventory != null)
+        {
+            foreach (var slot in GameManager.instance.inventory.slots)
+            {
+                // Crea il bottone
+                GameObject btnObj = Instantiate(itemButtonPrefab, itemsContainer);
+
+                // Imposta il testo: "Pokeball x5"
+                TMP_Text btnText = btnObj.GetComponentInChildren<TMP_Text>();
+                btnText.text = slot.item.itemName + " x" + slot.count;
+
+                // Aggiungi l'evento click
+                Button btn = btnObj.GetComponent<Button>();
+                ItemBase itemRef = slot.item; // Variabile locale per la closure
+                btn.onClick.AddListener(() => OnItemSelected(itemRef));
+            }
+        }
+    }
+
+    // 3. Quando clicchi su un oggetto nella lista
+    public void OnItemSelected(ItemBase item)
+    {
+        selectedItem = item;
+        itemDescriptionText.text = item.description;
+
+        // Qui potremmo aprire un pannellino di conferma "Usa / Annulla"
+        // Per semplicità, usiamo la Dialog Box principale per chiedere conferma
+        StartCoroutine(AskConfirmation(item));
+    }
+
+    IEnumerator AskConfirmation(ItemBase item)
+    {
+        // Nascondiamo momentaneamente lo zaino per vedere la scena
+        inventoryPanel.SetActive(false);
+
+        battleLogText.text = "Vuoi usare " + item.itemName + "? (Z per Sì, X per No)";
+        yield return new WaitForSeconds(0.2f); // Piccolo delay anti-input
+
+        bool choiceMade = false;
+        bool confirmed = false;
+
+        // Aspetta input (Loop semplice)
+        while (!choiceMade)
+        {
+            if (Input.GetKeyDown(KeyCode.Z)) // Conferma
+            {
+                confirmed = true;
+                choiceMade = true;
+            }
+            else if (Input.GetKeyDown(KeyCode.X)) // Annulla
+            {
+                confirmed = false;
+                choiceMade = true;
+            }
+            yield return null;
+        }
+
+        if (confirmed)
+        {
+            // Esegui l'azione dell'oggetto
+            yield return StartCoroutine(UseItem(item));
+        }
+        else
+        {
+            // Torna allo zaino
+            battleLogText.text = "Scegli un'azione.";
+            OnBagButton();
+        }
+    }
+
+    // 4. Logica di utilizzo (Cattura o altro)
+    IEnumerator UseItem(ItemBase item)
+    {
+        // Consumiamo l'oggetto
+        GameManager.instance.inventory.RemoveItem(item, 1);
+
+        // È una Pokeball?
+        if (item is PokeballItem)
+        {
+            yield return StartCoroutine(ThrowPokeball((PokeballItem)item));
+        }
+        else
+        {
+            // In futuro qui gestiremo Pozioni ecc.
+            battleLogText.text = "Hai usato " + item.itemName + ". Non succede nulla (WIP).";
+            yield return WaitForInput();
+
+            // Torna al menu principale o passa turno
+            actionsPanel.SetActive(true);
+        }
+    }
+
+    // Tasto "Indietro" nello zaino
+    public void OnBackFromBag()
+    {
+        inventoryPanel.SetActive(false);
+        actionsPanel.SetActive(true);
+        battleLogText.text = "Scegli un'azione.";
+    }
+
+    IEnumerator ThrowPokeball(PokeballItem pokeball)
+    {
+        state = BattleState.BUSY;
+        battleLogText.text = "Lanci la " + pokeball.itemName + "!";
+        yield return WaitForInput();
+
+        // LOGICA DI CATTURA (Formula Semplificata)
+        // Probabilità basata sugli HP rimanenti del nemico
+        float hpPercent = (float)enemyUnit.monster.currentHP / enemyUnit.monster.MaxHP;
+
+        // Esempio: 
+        // 100% vita = 0% bonus
+        // 1% vita = quasi 100% bonus
+        // Moltiplicato per il rate della palla (es. 1.0, 1.5, 2.0)
+
+        // Numero a caso tra 0 e 100
+        int randomValue = Random.Range(0, 100);
+
+        // Soglia per catturare:
+        // Se HP sono pieni (1.0), soglia = 10 * rate (Difficile)
+        // Se HP sono vuoti (0.1), soglia = 60 * rate (Facile)
+        int catchThreshold = (int)((1.0f - hpPercent) * 60f * pokeball.catchRateModifier) + 10;
+
+        // Simulazione suspance...
+        battleLogText.text = "...";
+        yield return new WaitForSeconds(1f);
+
+        if (randomValue < catchThreshold)
+        {
+            battleLogText.text = "Preso! " + enemyUnit.monster._base.monsterName + " catturato!";
+            yield return WaitForInput();
+
+            // Aggiungi alla squadra
+            if (GameManager.instance.playerParty.Count < 6)
+            {
+                GameManager.instance.playerParty.Add(enemyUnit.monster);
+                battleLogText.text = "Aggiunto alla squadra.";
+            }
+            else
+            {
+                battleLogText.text = "Squadra piena! (Futuro: Invia al PC)";
+                // Per ora perso se full
+            }
+            yield return WaitForInput();
+
+            // Fine Battaglia (Vittoria tecnica)
+            enemyUnit.gameObject.SetActive(false);
+
+            // IMPORTANTE: Pulizia dati se era un selvatico
+            // Se avevi salvato l'ID per Steve, qui non serve o va gestito diversamente
+            SceneManager.LoadScene(0);
+        }
+        else
+        {
+            battleLogText.text = "Agh! Si è liberato!";
+            yield return WaitForInput();
+
+            // Turno Nemico
+            state = BattleState.ENEMYTURN;
+            StartCoroutine(EnemyTurn());
+        }
     }
 }
